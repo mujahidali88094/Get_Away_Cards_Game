@@ -1,0 +1,235 @@
+startTheGame() {
+		console.log("starter: " + this.starterIndex);
+	
+		io.to(this.activeMembersRoom).emit("disableAll");
+		for (let j = 0; j < this.members.length; j++) {
+			io.to(this.activeMembersRoom).emit("status", { id: sockets.get(this.members[j].uId).id, status: "playing" });
+		}
+	
+		// let baari = baari1.bind(this);
+		
+		this.baari();;
+	}
+	setValidityOfCards() {      //some code wrapped in function, to be used more than once
+			
+		if (this.pile.length == 0)	this.validSuits = ['♥', '♦', '♣', '♠'];
+		else {
+			//valid suit is the suit of first card in the this.pile
+			this.validSuits = [this.pile[0].card.suit];
+			//check if currUser have this suit
+			if (!this.members[this.baariHolder].hasSuit(this.validSuits[0])) {
+				this.validSuits = ['♥', '♦', '♣', '♠'];
+				if (!this.ignoreThola) this.tholaProgram = true;
+			}
+			else this.tholaProgram = false;
+		}
+		//enable cards for current user
+		if (this.validSuits.length == 1) this.turnSocket.emit("enable", this.validSuits[0]);
+		else this.turnSocket.emit("enable", "all");
+	}
+	this.baari(); {
+	
+		this.this.turnUId = this.members[this.baariHolder].uId;    //user_id of person whose turn is this
+		this.this.turnSocket = sockets.get(this.turnUId);          //socket of person whose turn is this
+
+		//inform users about this baari
+		this.turnSocket.emit("message", "Your TURN ...");
+		this.turnSocket.to(this.activeMembersRoom).emit("message", "... Not Your TURN ...");
+
+		this.setValidityOfCards();
+		if (this.firstTurn) { // happens only in very first turn 
+			this.firstTurn = false;
+			this.handleThrownCard({ number: 'A', suit: '♠' });
+		}
+		else {
+			//start listening for take Card option
+			this.turnSocket.emit("turnOnTakeCards");
+
+			this.turnSocket.on("takeCards", () => {
+				let targetMIndex = this.findNextActiveMember(this.baariHolder); 
+				let targetUId = this.members[targetMIndex].uId;
+
+				let temp = [];
+				for (let s = 0; s < this.members[targetMIndex].cards.length; s++){
+					let card = this.members[targetMIndex].cards[s];
+					this.members[this.baariHolder].cards.push(card);          // add cards to this.baariHolders account
+					temp.push(card);
+				}
+				this.members[targetMIndex].cards.splice(0, this.members[targetMIndex].cards.length); // remove all cards of target 
+				sockets.get(targetUId).emit("removeAllCards");
+				sockets.get(targetUId).emit("message", "Previous player has taken your cards, So you have won");
+
+				// add cards to this.baariHolders account on client side
+				this.turnSocket.emit("addCards", temp);
+				this.turnSocket.emit("disableAll");
+				this.setValidityOfCards();
+
+
+				//updated count of next user
+				io.to(this.membersRoom).emit("updatedNoOfCards",
+					{
+						count: this.members[targetMIndex].cards.length,
+						id: sockets.get(targetUId).id
+					});
+				// won status for next player
+				io.to(this.membersRoom).emit("status", { id: sockets.get(targetUId).id, status: "won" });
+				//updated count of current user
+				io.to(this.membersRoom).emit("updatedNoOfCards",
+					{
+						count: this.members[this.baariHolder].cards.length,
+						id: this.turnSocket.id
+					}
+				);
+				// make target user inactive
+				this.members[targetMIndex].isActive = false;
+				sockets.get(targetUId).leave(this.activeMembersRoom);
+			});
+			
+			//wait for user input
+			this.turnSocket.on('cardThrown', thrownCard => {
+
+				//stop listening for take Card option
+				this.turnSocket.emit("turnOffTakeCards");
+				this.turnSocket.removeAllListeners("takeCards");
+
+				//go on
+				this.handleThrownCard(thrownCard);
+			});
+		}
+	}
+	handleThrownCard(thrownCard) {
+		if (this.validSuits.indexOf(thrownCard.suit) != -1) {
+			//disable cards for user
+			this.turnSocket.emit("disableAll");
+			this.turnSocket.removeAllListeners('cardThrown');
+	
+			//update cards at server
+			removeFromArray(this.members[this.baariHolder].cards, thrownCard);
+			//update cards count to all users
+			io.to(this.membersRoom).emit("updatedNoOfCards",
+				{
+					count: this.members[this.baariHolder].cards.length,
+					id: this.turnSocket.id
+				});
+			//send this card to all users
+			let newObj = { 'sender': this.turnSocket.id, 'card': thrownCard };
+			io.to(this.membersRoom).emit("itWasThrownBySomeone", newObj);
+			// this.highest
+			if (!this.tholaProgram) {
+				if (this.highest == -1) {
+					this.highest = this.baariHolder;
+				}
+				else {
+					if (significance.get(thrownCard.number) > significance.get(this.highestNumber(pile, this.highest))) {
+						this.highest = this.baariHolder;
+					}
+				}
+			}
+			//add thrown card to this.pile
+			this.pile.push({ memberIndex: this.baariHolder, card: thrownCard });
+			// thola
+			if (this.tholaProgram) {
+				io.to(this.activeMembersRoom).emit("message", "THOLA");
+				//wait a second
+				setTimeout(() => {
+
+					//add pile cards to this.highest's account
+					let temp = [];
+					for (let a = 0; a < this.pile.length; a++) {
+						this.members[this.highest].cards.push(this.pile[a].card); //on server side
+						temp.push(this.pile[a].card);
+					}
+					sockets.get(this.members[this.highest].uId).emit("addCards", temp); //on client side
+					sockets.get(this.members[this.highest].uId).emit("disableAll");
+	
+					//update cards count for every user
+					io.to(this.membersRoom).emit("updatedNoOfCards",
+						{
+							count: this.members[this.highest].cards.length,
+							id: sockets.get(this.members[this.highest].uId).id
+						}
+					);
+					
+					//empty this.pile
+					this.pile.splice(0, this.pile.length);                //on server side
+					io.to(this.membersRoom).emit("emptyPile");  //on client side
+
+					this.baariHolder = this.highest;          //next this.baariHolder
+
+					// check if anyone has won
+					for (let v = 0; v < this.members.length; v++) {
+						let target = this.members[v];
+						if (target.isActive && target.cards.length == 0) {
+							sockets.get(target.uId).emit("message", "You have won");
+							io.to(this.membersRoom).emit("status", { id: sockets.get(target.uId).id, status: "won" });
+							target.isActive = false;
+							sockets.get(target.uId).leave(this.activeMembersRoom);
+						}
+					}
+
+					//reset variables
+					this.highest = -1;
+					this.tholaProgram = false;
+
+					//if there is only one member left 
+					let test = this.countActiveMembers();
+					if (test.count == 1) {
+						let loserIndex = test.loserIndex;
+						let loserSocket = sockets.get(this.members[loserIndex].uId);
+						loserSocket.emit("disableAll");
+						loserSocket.emit("message", "You have lost the game");
+						io.to(this.membersRoom).emit("status", { id: loserSocket.id, status: "Bhabi/Loser" });
+						this.members[loserIndex].isActive = false;
+						loserSocket.leave(this.activeMembersRoom);
+						//game ends
+					}
+					else this.baari();; //next turn
+				}, 1000);
+			}
+			// if a round is complete
+			else if (this.pile.length >= this.countActiveMembers().count) {
+				if (this.ignoreThola) this.ignoreThola = false; // stop ignoring tholas after first round is complete
+				setTimeout(() => {
+					// if anyone has won
+					for (let v = 0; v < this.members.length; v++) {
+						let target = this.members[v];
+						if (target.isActive && target.cards.length == 0) {
+	
+							removeFromPileCardOf(v, this.pile);//remove his card from this.pile so that this.highest from the rest can be found
+							this.highest = findHigestFromPile(this.pile);
+	
+							sockets.get(target.uId).emit("message", "You have won");
+							io.to(this.membersRoom).emit("status", { id: sockets.get(target.uId).id, status: "won" });
+							target.isActive = false;
+							sockets.get(target.uId).leave(this.activeMembersRoom);
+						}
+					}
+	
+					//empty pile
+					this.this.pile.splice(0, this.pile.length);              // on server side
+					io.to(this.membersRoom).emit("emptyPile");// on client side
+
+					this.baariHolder = this.highest; // set next turn holder
+					this.highest = -1;          // reset
+
+					//if there is only one member left 
+					let test = this.countActiveMembers();
+					if (test.count == 1) {
+						let loserIndex = test.loserIndex;
+						let loserSocket = sockets.get(this.members[loserIndex].uId);
+						loserSocket.emit("disableAll");
+						loserSocket.emit("message", "You have lost the game");
+						io.to(this.membersRoom).emit("status", { id: loserSocket.id, status: "Bhabi/Loser" });
+						this.members[loserIndex].isActive = false;
+						loserSocket.leave(this.activeMembersRoom);
+					}
+					else this.baari();;
+				}, 1000);
+			}
+			// regular next turn
+			else {
+				this.baariHolder = this.findNextActiveMember(this.baariHolder);
+				this.baari();;
+			}
+		}
+	}

@@ -1,0 +1,32 @@
+*{
+	box-sizing: border-box;
+	margin: 0px;
+	padding: 0px;
+}
+.card{
+	position: relative;
+	border: 0.2em solid black;
+	border-radius: 0.6em;
+	display: inline-flex;
+	flex-direction: row;
+	font-family: consolas;
+	padding: 0.2em;
+}
+.card.red{
+	border-color: red;
+	color: red;
+}
+.card.black{
+	border-color: black;
+	color: black;
+}
+.card .main{
+	display: flex;
+	font-size: 5em;
+}
+.card .bottom{
+	align-self: flex-end;
+}
+.card .no{
+	font-weight: bold;
+}
